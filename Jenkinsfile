@@ -4,10 +4,15 @@ pipeline {
     environment {
         APP_NAME        = 'metatag-generator'
         LOCAL_IMAGE     = "metaforge/metatag-generator:jenkins-${BUILD_NUMBER}"
+
         K8S_NAMESPACE   = 'metaforge-prod'
         K8S_DEPLOYMENT  = 'metatag-generator'
         WSL_DISTRO      = 'Ubuntu'
+
         APP_ENV         = 'production'
+
+        // Jenkins runs as LocalSystem, so use the exact Python 3.11 path.
+        PYTHON_EXE      = 'C:\\Users\\Lenovo\\AppData\\Local\\Programs\\Python\\Python311\\python.exe'
     }
 
     options {
@@ -18,6 +23,10 @@ pipeline {
     }
 
     stages {
+
+        // ============================================================
+        // 01. SOURCE CONTROL
+        // ============================================================
 
         stage('01. Checkout Source Control') {
             steps {
@@ -41,30 +50,49 @@ pipeline {
             }
         }
 
+
+        // ============================================================
+        // 02. DEPENDENCIES
+        // ============================================================
+
         stage('02. Install Dependencies') {
             steps {
                 echo "--> [Jenkins] Installing backend and frontend dependencies..."
 
                 bat '''
-                    python --version
+                    echo Checking Python...
+                    "%PYTHON_EXE%" --version
+
+                    echo Checking Node.js...
                     node --version
+
+                    echo Checking npm...
                     npm --version
                 '''
 
                 dir('backend') {
                     bat '''
-                        python -m pip install --upgrade pip
-                        pip install -r requirements.txt
+                        echo Installing Python dependencies...
+                        "%PYTHON_EXE%" -m pip install --upgrade pip
+                        "%PYTHON_EXE%" -m pip install -r requirements.txt
                     '''
                 }
 
                 dir('frontend') {
                     bat '''
+                        echo Installing frontend dependencies...
                         npm ci
                     '''
                 }
+
+                echo "--> Dependency installation completed."
             }
         }
+
+
+        // ============================================================
+        // 03. TESTS
+        // ============================================================
 
         stage('03. Execute Automated Test Suite') {
             steps {
@@ -72,13 +100,18 @@ pipeline {
 
                 dir('backend') {
                     bat '''
-                        python -m pytest tests/ -v
+                        "%PYTHON_EXE%" -m pytest tests/ -v
                     '''
                 }
 
                 echo "--> Backend test suite completed successfully."
             }
         }
+
+
+        // ============================================================
+        // 04. FRONTEND BUILD
+        // ============================================================
 
         stage('04. Build Application Assets') {
             steps {
@@ -94,13 +127,23 @@ pipeline {
             }
         }
 
+
+        // ============================================================
+        // 05. DOCKER BUILD
+        // ============================================================
+
         stage('05. Build OCI Docker Image') {
             steps {
                 echo "--> [Docker] Building production image..."
 
                 bat '''
+                    echo Checking Docker...
                     docker version
+
+                    echo Building MetaForge image...
                     docker build -t %LOCAL_IMAGE% .
+
+                    echo Verifying image...
                     docker images %LOCAL_IMAGE%
                 '''
 
@@ -108,38 +151,54 @@ pipeline {
             }
         }
 
+
+        // ============================================================
+        // 06. SECURITY / IMAGE INSPECTION
+        // ============================================================
+
         stage('06. Scan Container Vulnerabilities') {
             steps {
-                echo "--> [Security] Checking Docker image..."
+                echo "--> [Security] Inspecting Docker image..."
 
                 bat '''
                     docker image inspect %LOCAL_IMAGE%
                 '''
 
                 echo "--> Container image inspection completed."
-                echo "--> Trivy integration can be enabled when Trivy is installed on the Jenkins agent."
+                echo "--> Trivy can be integrated later when installed on Jenkins."
             }
         }
+
+
+        // ============================================================
+        // 07. CONTAINER REGISTRY
+        // ============================================================
 
         stage('07. Push Image to Registry') {
             steps {
                 echo "--> [Registry] Preparing container image..."
 
                 /*
-                 * For the local college demonstration, the image remains
-                 * available in Docker Desktop/Minikube.
+                 * Local college demonstration mode.
                  *
-                 * Real GHCR push can be enabled later using Jenkins
-                 * username/password credentials.
+                 * The image remains inside Docker Desktop and is
+                 * subsequently loaded into Minikube.
+                 *
+                 * GHCR authentication/push can be enabled later.
                  */
 
                 bat '''
                     docker image inspect %LOCAL_IMAGE%
                 '''
 
-                echo "--> Local registry/demo image is ready."
+                echo "--> Local Docker image is ready for Minikube."
             }
         }
+
+
+        // ============================================================
+        // 08. TERRAFORM VALIDATION
+        // ============================================================
 
         stage('08. Terraform Infrastructure Validation') {
             steps {
@@ -157,6 +216,11 @@ pipeline {
             }
         }
 
+
+        // ============================================================
+        // 09. TERRAFORM PLAN
+        // ============================================================
+
         stage('09. Terraform Infrastructure Plan & Apply') {
             steps {
                 echo "--> [Terraform] Generating infrastructure plan..."
@@ -168,9 +232,14 @@ pipeline {
                 }
 
                 echo "--> Terraform plan generated successfully."
-                echo "--> Cloud apply is intentionally not automatic for the local college demo."
+                echo "--> Cloud infrastructure apply is disabled for local college demo."
             }
         }
+
+
+        // ============================================================
+        // 10. ANSIBLE
+        // ============================================================
 
         stage('10. Ansible Host Configuration Management') {
             steps {
@@ -178,38 +247,60 @@ pipeline {
 
                 bat '''
                     wsl -d %WSL_DISTRO% -- bash -lc "ansible --version"
-                    wsl -d %WSL_DISTRO% -- bash -lc "cd /mnt/c/meta\\ tag/ansible && ansible-playbook --syntax-check -i inventory playbook.yml"
+
+                    wsl -d %WSL_DISTRO% -- bash -lc "cd '/mnt/c/meta tag/ansible' && ansible-playbook --syntax-check -i inventory playbook.yml"
                 '''
 
                 echo "--> Ansible playbook syntax validation completed."
             }
         }
 
+
+        // ============================================================
+        // 11. KUBERNETES DEPLOYMENT
+        // ============================================================
+
         stage('11. Kubernetes Rolling Deployment') {
             steps {
-                echo "--> [Kubernetes] Deploying MetaForge to Minikube..."
+                echo "--> [Kubernetes] Checking Minikube..."
 
                 bat '''
                     wsl -d %WSL_DISTRO% -- bash -lc "minikube status"
                     wsl -d %WSL_DISTRO% -- bash -lc "kubectl get nodes"
                 '''
 
-                echo "--> Loading Jenkins-built Docker image into Minikube..."
+                echo "--> Loading Jenkins Docker image into Minikube..."
 
                 bat '''
                     wsl -d %WSL_DISTRO% -- bash -lc "minikube image load %LOCAL_IMAGE%"
+                '''
+
+                echo "--> Verifying image inside Minikube..."
+
+                bat '''
+                    wsl -d %WSL_DISTRO% -- bash -lc "minikube image ls | grep -F '%LOCAL_IMAGE%' || true"
                 '''
 
                 echo "--> Updating Kubernetes deployment image..."
 
                 bat '''
                     wsl -d %WSL_DISTRO% -- bash -lc "kubectl -n %K8S_NAMESPACE% set image deployment/%K8S_DEPLOYMENT app=%LOCAL_IMAGE%"
+                '''
+
+                echo "--> Waiting for Kubernetes rolling update..."
+
+                bat '''
                     wsl -d %WSL_DISTRO% -- bash -lc "kubectl -n %K8S_NAMESPACE% rollout status deployment/%K8S_DEPLOYMENT --timeout=180s"
                 '''
 
                 echo "--> Kubernetes rolling deployment completed."
             }
         }
+
+
+        // ============================================================
+        // 12. PRODUCTION VERIFICATION
+        // ============================================================
 
         stage('12. Production Deployment Verification') {
             steps {
@@ -224,7 +315,7 @@ pipeline {
                 echo "--> Checking pod readiness..."
 
                 bat '''
-                    wsl -d %WSL_DISTRO% -- bash -lc "kubectl -n %K8S_NAMESPACE% wait --for=condition=Ready pod -l app=%K8S_DEPLOYMENT --timeout=180s"
+                    wsl -d %WSL_DISTRO% -- bash -lc "kubectl -n %K8S_NAMESPACE% wait --for=condition=Ready pod -l app=%K8S_DEPLOYMENT% --timeout=180s"
                 '''
 
                 echo "--> Kubernetes production verification completed."
@@ -232,7 +323,13 @@ pipeline {
         }
     }
 
+
+    // ================================================================
+    // POST ACTIONS
+    // ================================================================
+
     post {
+
         always {
             echo "--> Cleaning up transient workspace artifacts..."
         }
@@ -244,6 +341,8 @@ pipeline {
             echo "--> Git Commit : ${env.GIT_COMMIT_HASH}"
             echo "--> Kubernetes : ${K8S_NAMESPACE}"
             echo "--> Deployment : ${K8S_DEPLOYMENT}"
+            echo "--> Docker     : ${LOCAL_IMAGE}"
+            echo "=========================================================="
         }
 
         failure {
