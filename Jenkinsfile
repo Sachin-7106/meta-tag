@@ -2,32 +2,40 @@ pipeline {
     agent any
 
     environment {
-        APP_NAME           = 'metatag-generator'
-        REGISTRY           = 'ghcr.io/metaforge'
-        IMAGE_TAG          = "1.4.2-${BUILD_NUMBER}"
-        FULL_IMAGE_NAME    = "${REGISTRY}/${APP_NAME}:${IMAGE_TAG}"
-        DOCKER_CREDS_ID    = 'github-container-registry-creds'
-        AWS_CREDS_ID       = 'aws-cloud-credentials'
-        KUBECONFIG_ID      = 'k8s-kubeconfig-secret'
-        DEMO_MODE          = 'true'
-        APP_ENV            = 'production'
+        APP_NAME        = 'metatag-generator'
+        LOCAL_IMAGE     = "metaforge/metatag-generator:jenkins-${BUILD_NUMBER}"
+        K8S_NAMESPACE   = 'metaforge-prod'
+        K8S_DEPLOYMENT  = 'metatag-generator'
+        WSL_DISTRO      = 'Ubuntu'
+        APP_ENV         = 'production'
     }
 
     options {
         buildDiscarder(logRotator(numToKeepStr: '20'))
+        disableConcurrentBuilds()
         timeout(time: 1, unit: 'HOURS')
         timestamps()
-        //ansiColor('xterm')
     }
 
     stages {
-        
+
         stage('01. Checkout Source Control') {
             steps {
-                echo "--> [GitHub] Checking out branch ${env.BRANCH_NAME ?: 'main'} from repository..."
+                echo "--> [GitHub] Checking out branch main..."
+
                 checkout scm
+
+                bat '''
+                    git --version
+                    git rev-parse --short HEAD
+                '''
+
                 script {
-                    env.GIT_COMMIT_HASH = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                    env.GIT_COMMIT_HASH = bat(
+                        script: '@git rev-parse --short HEAD',
+                        returnStdout: true
+                    ).trim()
+
                     echo "--> Git Commit Hash: ${env.GIT_COMMIT_HASH}"
                 }
             }
@@ -35,143 +43,212 @@ pipeline {
 
         stage('02. Install Dependencies') {
             steps {
-                echo "--> [Jenkins] Installing Backend (Python) and Frontend (Node.js) dependencies..."
+                echo "--> [Jenkins] Installing backend and frontend dependencies..."
+
+                bat '''
+                    python --version
+                    node --version
+                    npm --version
+                '''
+
                 dir('backend') {
-                    sh 'python -m pip install --upgrade pip'
-                    sh 'pip install -r requirements.txt'
+                    bat '''
+                        python -m pip install --upgrade pip
+                        pip install -r requirements.txt
+                    '''
                 }
+
                 dir('frontend') {
-                    sh 'npm ci'
+                    bat '''
+                        npm ci
+                    '''
                 }
             }
         }
 
         stage('03. Execute Automated Test Suite') {
             steps {
-                echo "--> [Jenkins] Executing unit & integration test suites..."
+                echo "--> [Jenkins] Running automated backend tests..."
+
                 dir('backend') {
-                    sh 'python -m pytest tests/ -v'
+                    bat '''
+                        python -m pytest tests/ -v
+                    '''
                 }
-                dir('frontend') {
-                    sh 'npm run lint || true'
-                }
+
+                echo "--> Backend test suite completed successfully."
             }
         }
 
         stage('04. Build Application Assets') {
             steps {
-                echo "--> [Jenkins] Building production static distribution bundle..."
+                echo "--> [Jenkins] Building production frontend..."
+
                 dir('frontend') {
-                    sh 'npm run build'
+                    bat '''
+                        npm run build
+                    '''
                 }
+
+                echo "--> Frontend production build completed."
             }
         }
 
         stage('05. Build OCI Docker Image') {
             steps {
-                echo "--> [Docker] Building multi-stage production Docker image: ${FULL_IMAGE_NAME}"
-                sh "docker build -t ${FULL_IMAGE_NAME} -t ${REGISTRY}/${APP_NAME}:latest ."
+                echo "--> [Docker] Building production image..."
+
+                bat '''
+                    docker version
+                    docker build -t %LOCAL_IMAGE% .
+                    docker images %LOCAL_IMAGE%
+                '''
+
+                echo "--> Docker image built successfully: ${LOCAL_IMAGE}"
             }
         }
 
         stage('06. Scan Container Vulnerabilities') {
             steps {
-                echo "--> [Docker] Running Trivy vulnerability scanner on image ${FULL_IMAGE_NAME}"
-                // sh "trivy image --severity HIGH,CRITICAL ${FULL_IMAGE_NAME}"
-                echo "--> Vulnerability scan completed: 0 HIGH or CRITICAL issues found."
+                echo "--> [Security] Checking Docker image..."
+
+                bat '''
+                    docker image inspect %LOCAL_IMAGE%
+                '''
+
+                echo "--> Container image inspection completed."
+                echo "--> Trivy integration can be enabled when Trivy is installed on the Jenkins agent."
             }
         }
 
         stage('07. Push Image to Registry') {
             steps {
-                echo "--> [Registry] Authenticating and pushing Docker image to Container Registry..."
+                echo "--> [Registry] Preparing container image..."
+
                 /*
-                withCredentials([usernamePassword(credentialsId: env.DOCKER_CREDS_ID, usernameVariable: 'REGISTRY_USER', passwordVariable: 'REGISTRY_PASS')]) {
-                    sh "echo \$REGISTRY_PASS | docker login ${REGISTRY} -u \$REGISTRY_USER --password-stdin"
-                    sh "docker push ${FULL_IMAGE_NAME}"
-                    sh "docker push ${REGISTRY}/${APP_NAME}:latest"
-                }
-                */
-                echo "--> Docker image pushed successfully. Digest: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                 * For the local college demonstration, the image remains
+                 * available in Docker Desktop/Minikube.
+                 *
+                 * Real GHCR push can be enabled later using Jenkins
+                 * username/password credentials.
+                 */
+
+                bat '''
+                    docker image inspect %LOCAL_IMAGE%
+                '''
+
+                echo "--> Local registry/demo image is ready."
             }
         }
 
         stage('08. Terraform Infrastructure Validation') {
             steps {
-                echo "--> [Terraform] Validating Infrastructure as Code configuration..."
+                echo "--> [Terraform] Validating Infrastructure as Code..."
+
                 dir('terraform') {
-                    sh 'terraform init -backend=false'
-                    sh 'terraform validate'
+                    bat '''
+                        terraform version
+                        terraform init -backend=false
+                        terraform validate
+                    '''
                 }
+
+                echo "--> Terraform validation completed."
             }
         }
 
         stage('09. Terraform Infrastructure Plan & Apply') {
             steps {
-                echo "--> [Terraform] Planning & applying cloud infrastructure..."
+                echo "--> [Terraform] Generating infrastructure plan..."
+
                 dir('terraform') {
-                    /*
-                    sh 'terraform plan -out=tfplan'
-                    sh 'terraform apply -auto-approve tfplan'
-                    */
-                    echo "--> Terraform plan completed: 0 to add, 0 to change, 0 to destroy. Infrastructure matching target state."
+                    bat '''
+                        terraform plan -out=tfplan
+                    '''
                 }
+
+                echo "--> Terraform plan generated successfully."
+                echo "--> Cloud apply is intentionally not automatic for the local college demo."
             }
         }
 
         stage('10. Ansible Host Configuration Management') {
             steps {
-                echo "--> [Ansible] Executing Ansible configuration playbook site.yml..."
-                dir('ansible') {
-                    /*
-                    sh 'ansible-playbook -i inventory playbook.yml'
-                    */
-                    echo "--> Ansible playbook execution recap: ok=18 changed=4 unreachable=0 failed=0"
-                }
+                echo "--> [Ansible] Validating Ansible configuration through WSL..."
+
+                bat '''
+                    wsl -d %WSL_DISTRO% -- bash -lc "ansible --version"
+                    wsl -d %WSL_DISTRO% -- bash -lc "cd /mnt/c/meta\\ tag/ansible && ansible-playbook --syntax-check -i inventory playbook.yml"
+                '''
+
+                echo "--> Ansible playbook syntax validation completed."
             }
         }
 
         stage('11. Kubernetes Rolling Deployment') {
             steps {
-                echo "--> [Kubernetes] Rolling update on cluster namespace metaforge-prod..."
-                dir('kubernetes') {
-                    /*
-                    sh 'kubectl apply -f configmap.yaml'
-                    sh 'kubectl apply -f deployment.yaml'
-                    sh 'kubectl apply -f service.yaml'
-                    sh 'kubectl apply -f ingress.yaml'
-                    sh "kubectl set image deployment/metatag-generator app=${FULL_IMAGE_NAME} -n metaforge-prod"
-                    sh 'kubectl rollout status deployment/metatag-generator -n metaforge-prod --timeout=180s'
-                    */
-                    echo "--> Deployment rollout status: 3 of 3 updated replicas ready."
-                }
+                echo "--> [Kubernetes] Deploying MetaForge to Minikube..."
+
+                bat '''
+                    wsl -d %WSL_DISTRO% -- bash -lc "minikube status"
+                    wsl -d %WSL_DISTRO% -- bash -lc "kubectl get nodes"
+                '''
+
+                echo "--> Loading Jenkins-built Docker image into Minikube..."
+
+                bat '''
+                    wsl -d %WSL_DISTRO% -- bash -lc "minikube image load %LOCAL_IMAGE%"
+                '''
+
+                echo "--> Updating Kubernetes deployment image..."
+
+                bat '''
+                    wsl -d %WSL_DISTRO% -- bash -lc "kubectl -n %K8S_NAMESPACE% set image deployment/%K8S_DEPLOYMENT app=%LOCAL_IMAGE%"
+                    wsl -d %WSL_DISTRO% -- bash -lc "kubectl -n %K8S_NAMESPACE% rollout status deployment/%K8S_DEPLOYMENT --timeout=180s"
+                '''
+
+                echo "--> Kubernetes rolling deployment completed."
             }
         }
 
         stage('12. Production Deployment Verification') {
             steps {
-                echo "--> [Production] Running HTTP health checks on cluster ingress endpoint..."
-                /*
-                sh 'curl -f --retry 5 --retry-delay 3 https://metatags.example.com/api/health'
-                */
-                echo "--> Health check verification: HTTP 200 OK! Deployment Live."
+                echo "--> [Production] Verifying Kubernetes deployment..."
+
+                bat '''
+                    wsl -d %WSL_DISTRO% -- bash -lc "kubectl -n %K8S_NAMESPACE% get deployment"
+                    wsl -d %WSL_DISTRO% -- bash -lc "kubectl -n %K8S_NAMESPACE% get pods -o wide"
+                    wsl -d %WSL_DISTRO% -- bash -lc "kubectl -n %K8S_NAMESPACE% get service"
+                '''
+
+                echo "--> Checking pod readiness..."
+
+                bat '''
+                    wsl -d %WSL_DISTRO% -- bash -lc "kubectl -n %K8S_NAMESPACE% wait --for=condition=Ready pod -l app=%K8S_DEPLOYMENT --timeout=180s"
+                '''
+
+                echo "--> Kubernetes production verification completed."
             }
         }
-
     }
 
     post {
         always {
-            echo "--> Cleaning up transient workspace build artifacts..."
+            echo "--> Cleaning up transient workspace artifacts..."
         }
+
         success {
             echo "=========================================================="
-            echo "   METAFORGE PIPELINE BUILD #${BUILD_NUMBER} SUCCESSFUL!  "
+            echo "   METAFORGE PIPELINE BUILD #${BUILD_NUMBER} SUCCESSFUL!"
             echo "=========================================================="
+            echo "--> Git Commit : ${env.GIT_COMMIT_HASH}"
+            echo "--> Kubernetes : ${K8S_NAMESPACE}"
+            echo "--> Deployment : ${K8S_DEPLOYMENT}"
         }
+
         failure {
             echo "=========================================================="
-            echo "   METAFORGE PIPELINE BUILD #${BUILD_NUMBER} FAILED!      "
+            echo "   METAFORGE PIPELINE BUILD #${BUILD_NUMBER} FAILED!"
             echo "=========================================================="
         }
     }
