@@ -306,70 +306,63 @@ pipeline {
         // 09. TERRAFORM PLAN
         // ==========================================================
 
-        stage('09. Terraform Infrastructure Plan') {
+       stage('09. Terraform Infrastructure Plan') {
 
-            steps {
+    steps {
 
-                echo '=========================================================='
-                echo '09. TERRAFORM INFRASTRUCTURE PLAN'
-                echo '=========================================================='
+        echo '=========================================================='
+        echo '09. TERRAFORM INFRASTRUCTURE PLAN'
+        echo '=========================================================='
 
-                script {
+        script {
 
-                    /*
-                     * The project currently contains an AWS provider.
-                     *
-                     * Jenkins does not have AWS credentials configured.
-                     *
-                     * Therefore:
-                     *
-                     * - Terraform INIT is performed
-                     * - Terraform VALIDATE is performed
-                     * - Terraform PLAN is attempted only when
-                     *   AWS credentials are available
-                     *
-                     * This prevents the local Minikube pipeline from
-                     * failing because of missing AWS credentials.
-                     */
+            if (env.DEMO_MODE == 'true') {
 
-                    def awsAvailable = bat(
-                        script: '''
-                            if defined AWS_ACCESS_KEY_ID if defined AWS_SECRET_ACCESS_KEY (
-                                exit /b 0
-                            ) else (
-                                exit /b 1
-                            )
-                        ''',
-                        returnStatus: true
+                echo '----------------------------------------------------------'
+                echo 'TERRAFORM LOCAL DEMO MODE'
+                echo '----------------------------------------------------------'
+                echo 'DEMO_MODE=true'
+                echo 'AWS infrastructure provisioning is disabled.'
+                echo 'Terraform configuration has already been validated.'
+                echo 'Skipping AWS Terraform plan.'
+                echo 'Continuing with local Minikube deployment.'
+                echo '----------------------------------------------------------'
+
+            } else {
+
+                def awsCredentialsAvailable = bat(
+                    script: '''
+                        if "%AWS_ACCESS_KEY_ID%"=="" exit /b 1
+                        if "%AWS_SECRET_ACCESS_KEY%"=="" exit /b 1
+                        exit /b 0
+                    ''',
+                    returnStatus: true
+                )
+
+                if (awsCredentialsAvailable != 0) {
+
+                    error(
+                        'AWS credentials are required when DEMO_MODE=false. ' +
+                        'Configure AWS credentials in Jenkins.'
                     )
 
-                    if (awsAvailable == 0) {
-
-                        echo '--> AWS credentials detected.'
-                        echo '--> Running Terraform plan...'
-
-                        dir('terraform') {
-
-                            bat '''
-                                "%TERRAFORM_EXE%" plan -out=tfplan
-                            '''
-                        }
-
-                        echo '--> Terraform plan completed.'
-
-                    } else {
-
-                        echo '----------------------------------------------------------'
-                        echo 'TERRAFORM LOCAL DEMO MODE'
-                        echo '----------------------------------------------------------'
-                        echo 'AWS credentials are not configured.'
-                        echo 'Terraform validation has already passed.'
-                        echo 'AWS plan/apply is skipped for this local Minikube demo.'
-                        echo '----------------------------------------------------------'
-                    }
                 }
+
+                echo '--> AWS credentials detected.'
+                echo '--> Running Terraform plan...'
+
+                dir('terraform') {
+
+                    bat '''
+                        "%TERRAFORM_EXE%" plan -out=tfplan
+                    '''
+                }
+
+                echo '--> Terraform plan completed successfully.'
             }
         }
+    }
+}
 
 
         // ==========================================================
