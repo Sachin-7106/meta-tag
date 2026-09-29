@@ -306,120 +306,147 @@ pipeline {
         // 09. TERRAFORM PLAN
         // ==========================================================
 
-       stage('09. Terraform Infrastructure Plan') {
+        stage('09. Terraform Infrastructure Plan') {
 
-    steps {
+            steps {
 
-        echo '=========================================================='
-        echo '09. TERRAFORM INFRASTRUCTURE PLAN'
-        echo '=========================================================='
+                echo '=========================================================='
+                echo '09. TERRAFORM INFRASTRUCTURE PLAN'
+                echo '=========================================================='
 
-        script {
+                script {
 
-            if (env.DEMO_MODE == 'true') {
+                    if (env.DEMO_MODE == 'true') {
 
-                echo '----------------------------------------------------------'
-                echo 'TERRAFORM LOCAL DEMO MODE'
-                echo '----------------------------------------------------------'
-                echo 'DEMO_MODE=true'
-                echo 'AWS infrastructure provisioning is disabled.'
-                echo 'Terraform configuration has already been validated.'
-                echo 'Skipping AWS Terraform plan.'
-                echo 'Continuing with local Minikube deployment.'
-                echo '----------------------------------------------------------'
+                        echo '----------------------------------------------------------'
+                        echo 'TERRAFORM LOCAL DEMO MODE'
+                        echo '----------------------------------------------------------'
+                        echo 'DEMO_MODE=true'
+                        echo 'AWS infrastructure provisioning is disabled.'
+                        echo 'Terraform configuration has already been validated.'
+                        echo 'Skipping AWS Terraform plan.'
+                        echo 'Continuing with local Minikube deployment.'
+                        echo '----------------------------------------------------------'
 
-            } else {
+                    } else {
 
-                def awsCredentialsAvailable = bat(
-                    script: '''
-                        if "%AWS_ACCESS_KEY_ID%"=="" exit /b 1
-                        if "%AWS_SECRET_ACCESS_KEY%"=="" exit /b 1
-                        exit /b 0
-                    ''',
-                    returnStatus: true
-                )
+                        def awsCredentialsAvailable = bat(
+                            script: '''
+                                if "%AWS_ACCESS_KEY_ID%"=="" exit /b 1
+                                if "%AWS_SECRET_ACCESS_KEY%"=="" exit /b 1
+                                exit /b 0
+                            ''',
+                            returnStatus: true
+                        )
 
-                if (awsCredentialsAvailable != 0) {
+                        if (awsCredentialsAvailable != 0) {
 
-                    error(
-                        'AWS credentials are required when DEMO_MODE=false. ' +
-                        'Configure AWS credentials in Jenkins.'
-                    )
+                            error(
+                                'AWS credentials are required when DEMO_MODE=false. ' +
+                                'Configure AWS credentials in Jenkins.'
+                            )
+                        }
 
+                        echo '--> AWS credentials detected.'
+                        echo '--> Running Terraform plan...'
+
+                        dir('terraform') {
+
+                            bat '''
+                                "%TERRAFORM_EXE%" plan -out=tfplan
+                            '''
+                        }
+
+                        echo '--> Terraform plan completed successfully.'
+                    }
                 }
-
-                echo '--> AWS credentials detected.'
-                echo '--> Running Terraform plan...'
-
-                dir('terraform') {
-
-                    bat '''
-                        "%TERRAFORM_EXE%" plan -out=tfplan
-                    '''
-                }
-
-                echo '--> Terraform plan completed successfully.'
             }
         }
-    }
-}
+
+
+        // ==========================================================
+        // WSL DIAGNOSTIC
+        // ==========================================================
+
+        stage('WSL Diagnostic') {
+
+            steps {
+
+                echo '=========================================================='
+                echo 'WSL DIAGNOSTIC'
+                echo '=========================================================='
+
+                bat '''
+                    echo ===== WINDOWS USER =====
+                    whoami
+
+                    echo.
+                    echo ===== USER PROFILE =====
+                    echo USERPROFILE=%USERPROFILE%
+                    echo LOCALAPPDATA=%LOCALAPPDATA%
+
+                    echo.
+                    echo ===== WSL DISTROS =====
+                    wsl --list --verbose
+
+                    echo.
+                    echo ===== WSL STATUS =====
+                    wsl --status
+
+                    echo.
+                    echo ===== UBUNTU TEST =====
+                    wsl -d Ubuntu -- whoami
+                '''
+            }
+        }
 
 
         // ==========================================================
         // 10. ANSIBLE
         // ==========================================================
-stage('WSL Diagnostic') {
-    steps {
-        bat '''
-            echo ===== WINDOWS USER =====
-            whoami
 
-            echo ===== USER PROFILE =====
-            echo USERPROFILE=%USERPROFILE%
-            echo LOCALAPPDATA=%LOCALAPPDATA%
-
-            echo ===== WSL DISTROS =====
-            wsl --list --verbose
-
-            echo ===== WSL STATUS =====
-            wsl --status
-
-            echo ===== UBUNTU TEST =====
-            wsl -d Ubuntu -- whoami
-        '''
-    }
-}
         stage('10. Ansible Host Configuration Management') {
-    steps {
-        echo '=========================================================='
-        echo '10. ANSIBLE CONFIGURATION MANAGEMENT'
-        echo '=========================================================='
 
-        bat '''
-            echo Checking WSL...
-            wsl -d Ubuntu -- whoami
+            steps {
 
-            echo.
-            echo Checking Ansible...
-            wsl -d Ubuntu -- bash -lc "ansible --version"
+                echo '=========================================================='
+                echo '10. ANSIBLE CONFIGURATION MANAGEMENT'
+                echo '=========================================================='
 
-            echo.
-            echo Checking Ansible Playbook...
-            wsl -d Ubuntu -- bash -lc "ansible-playbook --version"
-        '''
+                bat '''
+                    echo.
+                    echo --> Checking WSL...
+                    wsl -d Ubuntu -- bash -lc "whoami"
 
-        dir('ansible') {
-            bat '''
-                echo.
-                echo Running Ansible playbook...
-                wsl -d Ubuntu -- bash -lc "cd /mnt/c/ProgramData/Jenkins/.jenkins/workspace/MetaForge-CI-CD/ansible && ansible-playbook -i inventory.ini playbook.yml"
-            '''
+                    echo.
+                    echo --> Checking Ansible...
+                    wsl -d Ubuntu -- bash -lc "ansible --version"
+
+                    echo.
+                    echo --> Checking Ansible Playbook...
+                    wsl -d Ubuntu -- bash -lc "ansible-playbook --version"
+                '''
+
+                dir('ansible') {
+
+                    bat '''
+                        echo.
+                        echo --> Validating Ansible inventory...
+
+                        wsl -d Ubuntu -- bash -lc "cd /mnt/c/ProgramData/Jenkins/.jenkins/workspace/MetaForge-CI-CD/ansible && ansible-inventory -i inventory.ini --list"
+
+                        echo.
+                        echo --> Running Ansible playbook...
+
+                        wsl -d Ubuntu -- bash -lc "cd /mnt/c/ProgramData/Jenkins/.jenkins/workspace/MetaForge-CI-CD/ansible && ansible-playbook -i inventory.ini playbook.yml"
+                    '''
+                }
+            }
         }
-    }
-}
+
 
         // ==========================================================
-        // 11. KUBERNETES DEPLOYMENT
+        // 11. KUBERNETES
         // ==========================================================
 
         stage('11. Kubernetes Rolling Deployment') {
@@ -430,76 +457,64 @@ stage('WSL Diagnostic') {
                 echo '11. KUBERNETES DEPLOYMENT'
                 echo '=========================================================='
 
-                echo '--> Checking kubectl...'
-
                 bat '''
-                    wsl -d "%WSL_DISTRO%" -- kubectl version --client
+                    echo.
+                    echo --> Checking WSL...
+                    wsl -d Ubuntu -- bash -lc "whoami"
+
+                    echo.
+                    echo --> Checking kubectl...
+                    wsl -d Ubuntu -- bash -lc "kubectl version --client"
+
+                    echo.
+                    echo --> Checking Minikube...
+                    wsl -d Ubuntu -- bash -lc "minikube version"
+
+                    echo.
+                    echo --> Checking Minikube status...
+                    wsl -d Ubuntu -- bash -lc "minikube status"
                 '''
 
-                echo '--> Checking Minikube...'
-
                 bat '''
-                    wsl -d "%WSL_DISTRO%" -- minikube version
+                    echo.
+                    echo --> Loading Docker image into Minikube...
+
+                    wsl -d Ubuntu -- bash -lc "minikube image load metaforge/metatag-generator:jenkins-${BUILD_NUMBER}"
                 '''
 
-                echo '--> Checking Minikube cluster...'
-
                 bat '''
-                    wsl -d "%WSL_DISTRO%" -- minikube status
+                    echo.
+                    echo --> Applying Kubernetes manifests...
+
+                    wsl -d Ubuntu -- bash -lc "cd /mnt/c/ProgramData/Jenkins/.jenkins/workspace/MetaForge-CI-CD/kubernetes && kubectl apply -f ."
                 '''
 
-                echo '--> Loading Docker image into Minikube...'
-
                 bat '''
-                    wsl -d "%WSL_DISTRO%" -- minikube image load "%FULL_IMAGE"
+                    echo.
+                    echo --> Updating deployment image...
+
+                    wsl -d Ubuntu -- bash -lc "kubectl set image deployment/metatag-generator -n metaforge-prod metaforge-app=metaforge/metatag-generator:jenkins-${BUILD_NUMBER}"
                 '''
 
-                echo '--> Creating Kubernetes namespace...'
-
                 bat '''
-                    wsl -d "%WSL_DISTRO%" -- kubectl create namespace "%K8S_NAMESPACE%" --dry-run=client -o yaml ^
-                        | wsl -d "%WSL_DISTRO%" -- kubectl apply -f -
+                    echo.
+                    echo --> Waiting for rollout...
+
+                    wsl -d Ubuntu -- bash -lc "kubectl rollout status deployment/metatag-generator -n metaforge-prod --timeout=180s"
                 '''
 
-                echo '--> Applying ConfigMap...'
-
                 bat '''
-                    wsl -d "%WSL_DISTRO%" -- kubectl apply ^
-                        -f /mnt/c/ProgramData/Jenkins/.jenkins/workspace/MetaForge-CI-CD/kubernetes/configmap.yaml ^
-                        -n "%K8S_NAMESPACE%"
+                    echo.
+                    echo --> Kubernetes resources...
+
+                    wsl -d Ubuntu -- bash -lc "kubectl get deployments,pods,services,ingress -n metaforge-prod -o wide"
                 '''
-
-                echo '--> Applying Deployment...'
-
-                bat '''
-                    wsl -d "%WSL_DISTRO%" -- kubectl apply ^
-                        -f /mnt/c/ProgramData/Jenkins/.jenkins/workspace/MetaForge-CI-CD/kubernetes/deployment.yaml ^
-                        -n "%K8S_NAMESPACE%"
-                '''
-
-                echo '--> Applying Service...'
-
-                bat '''
-                    wsl -d "%WSL_DISTRO%" -- kubectl apply ^
-                        -f /mnt/c/ProgramData/Jenkins/.jenkins/workspace/MetaForge-CI-CD/kubernetes/service.yaml ^
-                        -n "%K8S_NAMESPACE%"
-                '''
-
-                echo '--> Applying Ingress...'
-
-                bat '''
-                    wsl -d "%WSL_DISTRO%" -- kubectl apply ^
-                        -f /mnt/c/ProgramData/Jenkins/.jenkins/workspace/MetaForge-CI-CD/kubernetes/ingress.yaml ^
-                        -n "%K8S_NAMESPACE%"
-                '''
-
-                echo '--> Kubernetes resources applied.'
             }
         }
 
 
         // ==========================================================
-        // 12. DEPLOYMENT VERIFICATION
+        // 12. PRODUCTION VERIFICATION
         // ==========================================================
 
         stage('12. Production Deployment Verification') {
@@ -513,39 +528,31 @@ stage('WSL Diagnostic') {
                 echo '--> Waiting for Kubernetes rollout...'
 
                 bat '''
-                    wsl -d "%WSL_DISTRO%" -- kubectl rollout status ^
-                        deployment/%K8S_DEPLOYMENT% ^
-                        -n "%K8S_NAMESPACE%" ^
-                        --timeout=180s
+                    wsl -d Ubuntu -- bash -lc "kubectl rollout status deployment/metatag-generator -n metaforge-prod --timeout=180s"
                 '''
 
                 echo '--> Checking deployment...'
 
                 bat '''
-                    wsl -d "%WSL_DISTRO%" -- kubectl get deployment ^
-                        -n "%K8S_NAMESPACE%"
+                    wsl -d Ubuntu -- bash -lc "kubectl get deployment -n metaforge-prod"
                 '''
 
                 echo '--> Checking pods...'
 
                 bat '''
-                    wsl -d "%WSL_DISTRO%" -- kubectl get pods ^
-                        -n "%K8S_NAMESPACE%" ^
-                        -o wide
+                    wsl -d Ubuntu -- bash -lc "kubectl get pods -n metaforge-prod -o wide"
                 '''
 
                 echo '--> Checking services...'
 
                 bat '''
-                    wsl -d "%WSL_DISTRO%" -- kubectl get service ^
-                        -n "%K8S_NAMESPACE%"
+                    wsl -d Ubuntu -- bash -lc "kubectl get service -n metaforge-prod"
                 '''
 
                 echo '--> Checking ingress...'
 
                 bat '''
-                    wsl -d "%WSL_DISTRO%" -- kubectl get ingress ^
-                        -n "%K8S_NAMESPACE%"
+                    wsl -d Ubuntu -- bash -lc "kubectl get ingress -n metaforge-prod"
                 '''
 
                 echo '=========================================================='
