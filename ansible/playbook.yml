@@ -1,65 +1,75 @@
 ---
 # =========================================================
 # MetaForge Ansible Configuration Playbook
-# Server preparation, Docker runtime, and K8s setup
+# Local WSL / Minikube Demo Environment
 # =========================================================
-- name: Prepare Kubernetes Cluster Worker Nodes & Container Runtime
+
+- name: Configure MetaForge Runtime Environment
   hosts: k8s_nodes
-  become: yes
+  gather_facts: yes
+  become: no
+
   vars:
-    app_user: appuser
-    app_dir: /opt/metaforge
+    app_dir: "{{ ansible_env.HOME }}/metaforge"
 
   tasks:
-    - name: 1. Install Docker Engine dependencies
-      apt:
-        name:
-          - apt-transport-https
-          - ca-certificates
-          - curl
-          - gnupg
-          - lsb-release
-        state: present
-        update_cache: yes
-      when: ansible_os_family == "Debian"
 
-    - name: 2. Configure sysctl bridge-nf-call-iptables for Kubernetes networking
-      sysctl:
-        name: net.bridge.bridge-nf-call-iptables
-        value: '1'
-        state: present
-        reload: yes
+    - name: 1. Verify Ansible execution
+      debug:
+        msg:
+          - "Ansible is running successfully"
+          - "Host: {{ inventory_hostname }}"
+          - "User: {{ ansible_user_id }}"
+          - "OS: {{ ansible_distribution }}"
 
-    - name: 3. Ensure Docker service is enabled and running
-      service:
-        name: docker
-        state: started
-        enabled: yes
+    - name: 2. Create MetaForge application directory
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        mode: '0755'
 
-    - name: 4. Create non-root application user
-      user:
-        name: "{{ app_user }}"
-        uid: 10001
-        shell: /bin/bash
-        create_home: yes
-
-    - name: 5. Add appuser to docker group
-      user:
-        name: "{{ app_user }}"
-        groups: docker
-        append: yes
-
-    - name: 6. Configure environment variables in /etc/environment
-      lineinfile:
-        path: /etc/environment
-        line: "DEMO_MODE=true"
-        state: present
-
-    - name: 7. Verify container runtime socket status
+    - name: 3. Verify Docker CLI
       command: docker info
       register: docker_info
       changed_when: false
+      failed_when: false
 
-    - name: 8. Print Playbook Summary
+    - name: 4. Verify Docker runtime
       debug:
-        msg: "Ansible Playbook completed on {{ inventory_hostname }}. Docker active."
+        msg: >-
+          Docker runtime check completed.
+          Docker available: {{ 'YES' if docker_info.rc == 0 else 'NO' }}
+
+    - name: 5. Configure MetaForge demo environment
+      copy:
+        dest: "{{ app_dir }}/environment.conf"
+        content: |
+          DEMO_MODE=true
+          APPLICATION=metaforge
+          ENVIRONMENT=production
+        mode: '0644'
+
+    - name: 6. Verify Kubernetes CLI
+      command: kubectl version --client
+      register: kubectl_version
+      changed_when: false
+      failed_when: false
+
+    - name: 7. Verify Minikube
+      command: minikube status
+      register: minikube_status
+      changed_when: false
+      failed_when: false
+
+    - name: 8. Print Ansible deployment summary
+      debug:
+        msg:
+          - "=========================================="
+          - "METAFORGE ANSIBLE CONFIGURATION COMPLETE"
+          - "=========================================="
+          - "Host: {{ inventory_hostname }}"
+          - "Docker: {{ 'AVAILABLE' if docker_info.rc == 0 else 'UNAVAILABLE' }}"
+          - "kubectl: {{ 'AVAILABLE' if kubectl_version.rc == 0 else 'UNAVAILABLE' }}"
+          - "Minikube: {{ 'AVAILABLE' if minikube_status.rc == 0 else 'UNAVAILABLE' }}"
+          - "Application directory: {{ app_dir }}"
+          - "DEMO_MODE: true"
