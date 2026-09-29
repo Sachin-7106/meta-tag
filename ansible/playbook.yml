@@ -1,0 +1,65 @@
+---
+# =========================================================
+# MetaForge Ansible Configuration Playbook
+# Server preparation, Docker runtime, and K8s setup
+# =========================================================
+- name: Prepare Kubernetes Cluster Worker Nodes & Container Runtime
+  hosts: k8s_nodes
+  become: yes
+  vars:
+    app_user: appuser
+    app_dir: /opt/metaforge
+
+  tasks:
+    - name: 1. Install Docker Engine dependencies
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: 2. Configure sysctl bridge-nf-call-iptables for Kubernetes networking
+      sysctl:
+        name: net.bridge.bridge-nf-call-iptables
+        value: '1'
+        state: present
+        reload: yes
+
+    - name: 3. Ensure Docker service is enabled and running
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: 4. Create non-root application user
+      user:
+        name: "{{ app_user }}"
+        uid: 10001
+        shell: /bin/bash
+        create_home: yes
+
+    - name: 5. Add appuser to docker group
+      user:
+        name: "{{ app_user }}"
+        groups: docker
+        append: yes
+
+    - name: 6. Configure environment variables in /etc/environment
+      lineinfile:
+        path: /etc/environment
+        line: "DEMO_MODE=true"
+        state: present
+
+    - name: 7. Verify container runtime socket status
+      command: docker info
+      register: docker_info
+      changed_when: false
+
+    - name: 8. Print Playbook Summary
+      debug:
+        msg: "Ansible Playbook completed on {{ inventory_hostname }}. Docker active."

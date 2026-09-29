@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: metatag-config
+  namespace: metaforge-prod
+  labels:
+    app.kubernetes.io/name: metatag-generator
+data:
+  APP_ENV: "production"
+  DEMO_MODE: "true"
+  LOG_LEVEL: "INFO"
+  PORT: "8000"

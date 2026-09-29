@@ -1,0 +1,9 @@
+[k8s_nodes]
+node-01 ansible_host=10.244.0.10 ansible_connection=local
+node-02 ansible_host=10.244.0.11 ansible_connection=local
+node-03 ansible_host=10.244.0.12 ansible_connection=local
+
+[k8s_nodes:vars]
+ansible_python_interpreter=/usr/bin/python3
+environment=production
+docker_version=24.0.7

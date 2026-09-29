@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  metatag-generator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: metaforge/metatag-generator:1.4.2
+    container_name: metaforge-metatag-app
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_ENV=production
+      - DEMO_MODE=true
+      - PORT=8000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
