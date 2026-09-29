@@ -390,31 +390,33 @@ stage('WSL Diagnostic') {
     }
 }
         stage('10. Ansible Host Configuration Management') {
+    steps {
+        echo '=========================================================='
+        echo '10. ANSIBLE CONFIGURATION MANAGEMENT'
+        echo '=========================================================='
 
-            steps {
+        bat '''
+            echo Checking WSL...
+            wsl -d Ubuntu -- whoami
 
-                echo '=========================================================='
-                echo '10. ANSIBLE CONFIGURATION MANAGEMENT'
-                echo '=========================================================='
+            echo.
+            echo Checking Ansible...
+            wsl -d Ubuntu -- bash -lc "ansible --version"
 
-                echo '--> Checking Ansible inside WSL...'
+            echo.
+            echo Checking Ansible Playbook...
+            wsl -d Ubuntu -- bash -lc "ansible-playbook --version"
+        '''
 
-                bat '''
-                    wsl -d "%WSL_DISTRO%" -- ansible --version
-                '''
-
-                echo '--> Running Ansible playbook...'
-
-                bat '''
-                    wsl -d "%WSL_DISTRO%" -- ansible-playbook ^
-                        /mnt/c/ProgramData/Jenkins/.jenkins/workspace/MetaForge-CI-CD/ansible/playbook.yml ^
-                        -i /mnt/c/ProgramData/Jenkins/.jenkins/workspace/MetaForge-CI-CD/ansible/inventory
-                '''
-
-                echo '--> Ansible configuration completed.'
-            }
+        dir('ansible') {
+            bat '''
+                echo.
+                echo Running Ansible playbook...
+                wsl -d Ubuntu -- bash -lc "cd /mnt/c/ProgramData/Jenkins/.jenkins/workspace/MetaForge-CI-CD/ansible && ansible-playbook -i inventory.ini playbook.yml"
+            '''
         }
-
+    }
+}
 
         // ==========================================================
         // 11. KUBERNETES DEPLOYMENT
