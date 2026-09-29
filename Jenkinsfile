@@ -368,7 +368,27 @@ pipeline {
         // ==========================================================
         // 10. ANSIBLE
         // ==========================================================
+stage('WSL Diagnostic') {
+    steps {
+        bat '''
+            echo ===== WINDOWS USER =====
+            whoami
 
+            echo ===== USER PROFILE =====
+            echo USERPROFILE=%USERPROFILE%
+            echo LOCALAPPDATA=%LOCALAPPDATA%
+
+            echo ===== WSL DISTROS =====
+            wsl --list --verbose
+
+            echo ===== WSL STATUS =====
+            wsl --status
+
+            echo ===== UBUNTU TEST =====
+            wsl -d Ubuntu -- whoami
+        '''
+    }
+}
         stage('10. Ansible Host Configuration Management') {
 
             steps {
