@@ -1,113 +1,118 @@
 pipeline {
+
     agent any
 
-    environment {
-        // Application
-        APP_NAME        = 'metatag-generator'
-        APP_ENV         = 'production'
-
-        // Docker
-        LOCAL_IMAGE     = "metaforge/metatag-generator:jenkins-${BUILD_NUMBER}"
-        DOCKER_EXE      = 'C:\\Users\\Lenovo\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin\\docker.exe'
-
-        // Python
-        PYTHON_EXE      = 'C:\\Users\\Lenovo\\AppData\\Local\\Programs\\Python\\Python311\\python.exe'
-
-        // Terraform
-        TERRAFORM_EXE   = 'C:\\Terraform\\terraform.exe'
-
-        // WSL / Kubernetes
-        WSL_DISTRO      = 'Ubuntu'
-        K8S_NAMESPACE   = 'metaforge-prod'
-        K8S_DEPLOYMENT  = 'metatag-generator'
+    options {
+        timestamps()
+        timeout(time: 60, unit: 'MINUTES')
+        skipDefaultCheckout(false)
     }
 
-    options {
-        buildDiscarder(logRotator(numToKeepStr: '20'))
-        disableConcurrentBuilds()
-        timeout(time: 1, unit: 'HOURS')
-        timestamps()
+    environment {
+
+        // ==========================================================
+        // TOOLS
+        // ==========================================================
+
+        PYTHON_EXE = 'C:\\Users\\Lenovo\\AppData\\Local\\Programs\\Python\\Python311\\python.exe'
+
+        DOCKER_EXE = 'C:\\Users\\Lenovo\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin\\docker.exe'
+
+        TERRAFORM_EXE = 'C:\\Terraform\\terraform.exe'
+
+        // WSL distribution
+        WSL_DISTRO = 'Ubuntu'
+
+        // ==========================================================
+        // APPLICATION
+        // ==========================================================
+
+        IMAGE_NAME = 'metaforge/metatag-generator'
+
+        IMAGE_TAG = "jenkins-${BUILD_NUMBER}"
+
+        FULL_IMAGE = "${IMAGE_NAME}:jenkins-${BUILD_NUMBER}"
+
+        K8S_NAMESPACE = 'metaforge-prod'
+
+        K8S_DEPLOYMENT = 'metatag-generator'
+
+        // ==========================================================
+        // DEMO MODE
+        // ==========================================================
+
+        DEMO_MODE = 'true'
     }
 
     stages {
 
-        // =========================================================
+        // ==========================================================
         // 01. CHECKOUT
-        // =========================================================
+        // ==========================================================
+
         stage('01. Checkout Source Control') {
+
             steps {
-                echo '--> [GitHub] Checking out branch main...'
+
+                echo '=========================================================='
+                echo '01. GITHUB SOURCE CONTROL'
+                echo '=========================================================='
+
+                echo '--> Checking out source code...'
 
                 checkout scm
 
                 bat '''
                     echo Checking Git...
                     git --version
+
+                    echo.
+                    echo Current Commit:
                     git rev-parse --short HEAD
+
+                    echo.
+                    echo Current Branch:
+                    git branch --show-current
                 '''
 
                 script {
-                    env.GIT_COMMIT_HASH = bat(
-                        script: '@git rev-parse --short HEAD',
+                    def commitHash = bat(
+                        script: 'git rev-parse --short HEAD',
                         returnStdout: true
                     ).trim()
 
-                    echo "--> Git Commit Hash: ${env.GIT_COMMIT_HASH}"
+                    echo "--> Git Commit Hash: ${commitHash}"
                 }
             }
         }
 
 
-        // =========================================================
+        // ==========================================================
         // 02. INSTALL DEPENDENCIES
-        // =========================================================
+        // ==========================================================
+
         stage('02. Install Dependencies') {
+
             steps {
-                echo '--> [Jenkins] Installing backend and frontend dependencies...'
 
-                bat '''
-                    echo ==========================================
-                    echo Checking Python
-                    echo ==========================================
-                    "%PYTHON_EXE%" --version
+                echo '=========================================================='
+                echo '02. INSTALL DEPENDENCIES'
+                echo '=========================================================='
 
-                    echo.
-                    echo ==========================================
-                    echo Checking Node.js
-                    echo ==========================================
-                    node --version
-
-                    echo.
-                    echo ==========================================
-                    echo Checking npm
-                    echo ==========================================
-                    npm --version
-
-                    echo.
-                    echo ==========================================
-                    echo Checking Docker
-                    echo ==========================================
-                    "%DOCKER_EXE%" version
-                '''
+                echo '--> Installing backend dependencies...'
 
                 dir('backend') {
+
                     bat '''
-                        echo ==========================================
-                        echo Installing Python dependencies
-                        echo ==========================================
-
-                        "%PYTHON_EXE%" -m pip install --upgrade pip
-
                         "%PYTHON_EXE%" -m pip install -r requirements.txt
                     '''
                 }
 
-                dir('frontend') {
-                    bat '''
-                        echo ==========================================
-                        echo Installing frontend dependencies
-                        echo ==========================================
+                echo '--> Installing frontend dependencies...'
 
+                dir('frontend') {
+
+                    bat '''
                         npm ci
                     '''
                 }
@@ -117,33 +122,48 @@ pipeline {
         }
 
 
-        // =========================================================
+        // ==========================================================
         // 03. TEST
-        // =========================================================
+        // ==========================================================
+
         stage('03. Execute Automated Test Suite') {
+
             steps {
-                echo '--> [Jenkins] Running automated backend tests...'
+
+                echo '=========================================================='
+                echo '03. AUTOMATED TESTING'
+                echo '=========================================================='
+
+                echo '--> Running backend tests...'
 
                 dir('backend') {
+
                     bat '''
                         "%PYTHON_EXE%" -m pytest tests/ -v
                     '''
                 }
 
-                echo '--> Backend test suite completed successfully.'
+                echo '--> All automated tests passed.'
             }
         }
 
 
-        // =========================================================
-        // 04. FRONTEND BUILD
-        // =========================================================
-        stage('04. Build Application Assets') {
+        // ==========================================================
+        // 04. BUILD APPLICATION
+        // ==========================================================
+
+        stage('04. Build Application') {
+
             steps {
-                echo '--> [Jenkins] Building production frontend...'
+
+                echo '=========================================================='
+                echo '04. APPLICATION BUILD'
+                echo '=========================================================='
 
                 dir('frontend') {
+
                     bat '''
+                        echo Building React production application...
                         npm run build
                     '''
                 }
@@ -153,275 +173,422 @@ pipeline {
         }
 
 
-        // =========================================================
+        // ==========================================================
         // 05. DOCKER BUILD
-        // =========================================================
+        // ==========================================================
+
         stage('05. Build OCI Docker Image') {
+
             steps {
-                echo "--> [Docker] Building production image: ${LOCAL_IMAGE}"
+
+                echo '=========================================================='
+                echo '05. DOCKER CONTAINERIZATION'
+                echo '=========================================================='
+
+                echo "--> Building Docker image: ${FULL_IMAGE}"
 
                 bat '''
-                    echo ==========================================
-                    echo Docker Engine
-                    echo ==========================================
-
+                    echo Checking Docker Engine...
                     "%DOCKER_EXE%" version
 
                     echo.
-                    echo ==========================================
-                    echo Building Docker Image
-                    echo ==========================================
+                    echo Building Docker image...
 
-                    "%DOCKER_EXE%" build -t %LOCAL_IMAGE% .
+                    "%DOCKER_EXE%" build ^
+                        -t "%FULL_IMAGE%" ^
+                        .
 
                     echo.
-                    echo ==========================================
-                    echo Docker Image
-                    echo ==========================================
+                    echo Docker image created successfully.
 
-                    "%DOCKER_EXE%" images %LOCAL_IMAGE%
+                    echo.
+                    echo Docker Image Details:
+
+                    "%DOCKER_EXE%" images "%IMAGE_NAME%"
                 '''
 
-                echo "--> Docker image built successfully: ${LOCAL_IMAGE}"
+                echo "--> Docker image built successfully: ${FULL_IMAGE}"
             }
         }
 
 
-        // =========================================================
-        // 06. SECURITY / IMAGE INSPECTION
-        // =========================================================
+        // ==========================================================
+        // 06. CONTAINER SECURITY SCAN
+        // ==========================================================
+
         stage('06. Scan Container Vulnerabilities') {
+
             steps {
-                echo '--> [Security] Inspecting Docker image...'
+
+                echo '=========================================================='
+                echo '06. CONTAINER SECURITY'
+                echo '=========================================================='
+
+                echo '--> Inspecting Docker image...'
 
                 bat '''
-                    "%DOCKER_EXE%" image inspect %LOCAL_IMAGE%
+                    "%DOCKER_EXE%" image inspect "%FULL_IMAGE%"
                 '''
 
-                echo '--> Container image inspection completed.'
-                echo '--> Trivy scanning can be enabled when Trivy is installed.'
+                echo '--> Docker image inspection completed.'
+
+                echo '--> Trivy scan can be enabled when Trivy is installed.'
+                echo '--> Continuing with image validation.'
             }
         }
 
 
-        // =========================================================
-        // 07. REGISTRY
-        // =========================================================
-        stage('07. Push Image to Registry') {
-            steps {
-                echo '--> [Registry] Preparing container image...'
+        // ==========================================================
+        // 07. CONTAINER REGISTRY
+        // ==========================================================
 
-                /*
-                 * LOCAL DEMO MODE
-                 *
-                 * The image remains inside Docker Desktop.
-                 * It will be loaded into Minikube in Stage 11.
-                 *
-                 * A real GHCR push can be enabled later with
-                 * Jenkins credentials.
-                 */
+        stage('07. Prepare Container Registry') {
+
+            steps {
+
+                echo '=========================================================='
+                echo '07. CONTAINER REGISTRY'
+                echo '=========================================================='
+
+                echo '--> Validating Docker image before registry stage...'
 
                 bat '''
-                    "%DOCKER_EXE%" image inspect %LOCAL_IMAGE%
+                    "%DOCKER_EXE%" image inspect "%FULL_IMAGE%"
                 '''
 
-                echo '--> Docker image is ready for Minikube.'
+                echo '--> Local image is ready.'
+
+                echo '----------------------------------------------------------'
+                echo 'DEMO MODE'
+                echo '----------------------------------------------------------'
+                echo 'Registry push is skipped because no registry credentials'
+                echo 'are configured in Jenkins.'
+                echo 'The image will be used directly by Minikube.'
+                echo '----------------------------------------------------------'
             }
         }
 
 
-        // =========================================================
+        // ==========================================================
         // 08. TERRAFORM VALIDATION
-        // =========================================================
+        // ==========================================================
+
         stage('08. Terraform Infrastructure Validation') {
+
             steps {
-                echo '--> [Terraform] Validating Infrastructure as Code...'
+
+                echo '=========================================================='
+                echo '08. TERRAFORM VALIDATION'
+                echo '=========================================================='
 
                 dir('terraform') {
-                    bat '''
-                        echo ==========================================
-                        echo Terraform Version
-                        echo ==========================================
 
+                    bat '''
+                        echo Terraform Version
                         "%TERRAFORM_EXE%" version
 
                         echo.
-                        echo ==========================================
                         echo Terraform Init
-                        echo ==========================================
-
                         "%TERRAFORM_EXE%" init -backend=false
 
                         echo.
-                        echo ==========================================
                         echo Terraform Validate
-                        echo ==========================================
-
                         "%TERRAFORM_EXE%" validate
                     '''
                 }
 
-                echo '--> Terraform validation completed.'
+                echo '--> Terraform validation completed successfully.'
             }
         }
 
 
-        // =========================================================
+        // ==========================================================
         // 09. TERRAFORM PLAN
-        // =========================================================
-        stage('09. Terraform Infrastructure Plan & Apply') {
-            steps {
-                echo '--> [Terraform] Generating infrastructure plan...'
+        // ==========================================================
 
-                dir('terraform') {
-                    bat '''
-                        "%TERRAFORM_EXE%" plan -out=tfplan
-                    '''
+        stage('09. Terraform Infrastructure Plan') {
+
+            steps {
+
+                echo '=========================================================='
+                echo '09. TERRAFORM INFRASTRUCTURE PLAN'
+                echo '=========================================================='
+
+                script {
+
+                    /*
+                     * The project currently contains an AWS provider.
+                     *
+                     * Jenkins does not have AWS credentials configured.
+                     *
+                     * Therefore:
+                     *
+                     * - Terraform INIT is performed
+                     * - Terraform VALIDATE is performed
+                     * - Terraform PLAN is attempted only when
+                     *   AWS credentials are available
+                     *
+                     * This prevents the local Minikube pipeline from
+                     * failing because of missing AWS credentials.
+                     */
+
+                    def awsAvailable = bat(
+                        script: '''
+                            if defined AWS_ACCESS_KEY_ID if defined AWS_SECRET_ACCESS_KEY (
+                                exit /b 0
+                            ) else (
+                                exit /b 1
+                            )
+                        ''',
+                        returnStatus: true
+                    )
+
+                    if (awsAvailable == 0) {
+
+                        echo '--> AWS credentials detected.'
+                        echo '--> Running Terraform plan...'
+
+                        dir('terraform') {
+
+                            bat '''
+                                "%TERRAFORM_EXE%" plan -out=tfplan
+                            '''
+                        }
+
+                        echo '--> Terraform plan completed.'
+
+                    } else {
+
+                        echo '----------------------------------------------------------'
+                        echo 'TERRAFORM LOCAL DEMO MODE'
+                        echo '----------------------------------------------------------'
+                        echo 'AWS credentials are not configured.'
+                        echo 'Terraform validation has already passed.'
+                        echo 'AWS plan/apply is skipped for this local Minikube demo.'
+                        echo '----------------------------------------------------------'
+                    }
                 }
-
-                echo '--> Terraform plan generated successfully.'
-                echo '--> Automatic cloud infrastructure apply is disabled for the local college demo.'
             }
         }
 
 
-        // =========================================================
+        // ==========================================================
         // 10. ANSIBLE
-        // =========================================================
+        // ==========================================================
+
         stage('10. Ansible Host Configuration Management') {
+
             steps {
-                echo '--> [Ansible] Validating Ansible configuration through WSL...'
+
+                echo '=========================================================='
+                echo '10. ANSIBLE CONFIGURATION MANAGEMENT'
+                echo '=========================================================='
+
+                echo '--> Checking Ansible inside WSL...'
 
                 bat '''
-                    echo ==========================================
-                    echo Ansible Version
-                    echo ==========================================
-
-                    wsl -d %WSL_DISTRO% -- bash -lc "ansible --version"
-
-                    echo.
-                    echo ==========================================
-                    echo Ansible Syntax Check
-                    echo ==========================================
-
-                    wsl -d %WSL_DISTRO% -- bash -lc "cd '/mnt/c/meta tag/ansible' && ansible-playbook --syntax-check -i inventory playbook.yml"
+                    wsl -d "%WSL_DISTRO%" -- ansible --version
                 '''
 
-                echo '--> Ansible playbook syntax validation completed.'
+                echo '--> Running Ansible playbook...'
+
+                bat '''
+                    wsl -d "%WSL_DISTRO%" -- ansible-playbook ^
+                        /mnt/c/ProgramData/Jenkins/.jenkins/workspace/MetaForge-CI-CD/ansible/playbook.yml ^
+                        -i /mnt/c/ProgramData/Jenkins/.jenkins/workspace/MetaForge-CI-CD/ansible/inventory
+                '''
+
+                echo '--> Ansible configuration completed.'
             }
         }
 
 
-        // =========================================================
+        // ==========================================================
         // 11. KUBERNETES DEPLOYMENT
-        // =========================================================
+        // ==========================================================
+
         stage('11. Kubernetes Rolling Deployment') {
+
             steps {
-                echo '--> [Kubernetes] Checking Minikube cluster...'
+
+                echo '=========================================================='
+                echo '11. KUBERNETES DEPLOYMENT'
+                echo '=========================================================='
+
+                echo '--> Checking kubectl...'
 
                 bat '''
-                    echo ==========================================
-                    echo Minikube Status
-                    echo ==========================================
-
-                    wsl -d %WSL_DISTRO% -- bash -lc "minikube status"
-
-                    echo.
-                    echo ==========================================
-                    echo Kubernetes Nodes
-                    echo ==========================================
-
-                    wsl -d %WSL_DISTRO% -- bash -lc "kubectl get nodes"
+                    wsl -d "%WSL_DISTRO%" -- kubectl version --client
                 '''
 
-                echo '--> Loading Jenkins-built Docker image into Minikube...'
+                echo '--> Checking Minikube...'
 
                 bat '''
-                    wsl -d %WSL_DISTRO% -- bash -lc "minikube image load %LOCAL_IMAGE%"
+                    wsl -d "%WSL_DISTRO%" -- minikube version
                 '''
 
-                echo '--> Updating Kubernetes deployment image...'
+                echo '--> Checking Minikube cluster...'
 
                 bat '''
-                    wsl -d %WSL_DISTRO% -- bash -lc "kubectl -n %K8S_NAMESPACE% set image deployment/%K8S_DEPLOYMENT% app=%LOCAL_IMAGE%"
+                    wsl -d "%WSL_DISTRO%" -- minikube status
                 '''
 
-                echo '--> Waiting for Kubernetes rolling deployment...'
+                echo '--> Loading Docker image into Minikube...'
 
                 bat '''
-                    wsl -d %WSL_DISTRO% -- bash -lc "kubectl -n %K8S_NAMESPACE% rollout status deployment/%K8S_DEPLOYMENT% --timeout=180s"
+                    wsl -d "%WSL_DISTRO%" -- minikube image load "%FULL_IMAGE"
                 '''
 
-                echo '--> Kubernetes rolling deployment completed.'
+                echo '--> Creating Kubernetes namespace...'
+
+                bat '''
+                    wsl -d "%WSL_DISTRO%" -- kubectl create namespace "%K8S_NAMESPACE%" --dry-run=client -o yaml ^
+                        | wsl -d "%WSL_DISTRO%" -- kubectl apply -f -
+                '''
+
+                echo '--> Applying ConfigMap...'
+
+                bat '''
+                    wsl -d "%WSL_DISTRO%" -- kubectl apply ^
+                        -f /mnt/c/ProgramData/Jenkins/.jenkins/workspace/MetaForge-CI-CD/kubernetes/configmap.yaml ^
+                        -n "%K8S_NAMESPACE%"
+                '''
+
+                echo '--> Applying Deployment...'
+
+                bat '''
+                    wsl -d "%WSL_DISTRO%" -- kubectl apply ^
+                        -f /mnt/c/ProgramData/Jenkins/.jenkins/workspace/MetaForge-CI-CD/kubernetes/deployment.yaml ^
+                        -n "%K8S_NAMESPACE%"
+                '''
+
+                echo '--> Applying Service...'
+
+                bat '''
+                    wsl -d "%WSL_DISTRO%" -- kubectl apply ^
+                        -f /mnt/c/ProgramData/Jenkins/.jenkins/workspace/MetaForge-CI-CD/kubernetes/service.yaml ^
+                        -n "%K8S_NAMESPACE%"
+                '''
+
+                echo '--> Applying Ingress...'
+
+                bat '''
+                    wsl -d "%WSL_DISTRO%" -- kubectl apply ^
+                        -f /mnt/c/ProgramData/Jenkins/.jenkins/workspace/MetaForge-CI-CD/kubernetes/ingress.yaml ^
+                        -n "%K8S_NAMESPACE%"
+                '''
+
+                echo '--> Kubernetes resources applied.'
             }
         }
 
 
-        // =========================================================
-        // 12. PRODUCTION VERIFICATION
-        // =========================================================
+        // ==========================================================
+        // 12. DEPLOYMENT VERIFICATION
+        // ==========================================================
+
         stage('12. Production Deployment Verification') {
+
             steps {
-                echo '--> [Production] Verifying Kubernetes deployment...'
+
+                echo '=========================================================='
+                echo '12. PRODUCTION DEPLOYMENT VERIFICATION'
+                echo '=========================================================='
+
+                echo '--> Waiting for Kubernetes rollout...'
 
                 bat '''
-                    echo ==========================================
-                    echo Deployment
-                    echo ==========================================
-
-                    wsl -d %WSL_DISTRO% -- bash -lc "kubectl -n %K8S_NAMESPACE% get deployment"
-
-                    echo.
-                    echo ==========================================
-                    echo Pods
-                    echo ==========================================
-
-                    wsl -d %WSL_DISTRO% -- bash -lc "kubectl -n %K8S_NAMESPACE% get pods -o wide"
-
-                    echo.
-                    echo ==========================================
-                    echo Service
-                    echo ==========================================
-
-                    wsl -d %WSL_DISTRO% -- bash -lc "kubectl -n %K8S_NAMESPACE% get service"
+                    wsl -d "%WSL_DISTRO%" -- kubectl rollout status ^
+                        deployment/%K8S_DEPLOYMENT% ^
+                        -n "%K8S_NAMESPACE%" ^
+                        --timeout=180s
                 '''
 
-                echo '--> Checking pod readiness...'
+                echo '--> Checking deployment...'
 
                 bat '''
-                    wsl -d %WSL_DISTRO% -- bash -lc "kubectl -n %K8S_NAMESPACE% wait --for=condition=Ready pod -l app=%K8S_DEPLOYMENT% --timeout=180s"
+                    wsl -d "%WSL_DISTRO%" -- kubectl get deployment ^
+                        -n "%K8S_NAMESPACE%"
                 '''
 
-                echo '--> Kubernetes production verification completed.'
+                echo '--> Checking pods...'
+
+                bat '''
+                    wsl -d "%WSL_DISTRO%" -- kubectl get pods ^
+                        -n "%K8S_NAMESPACE%" ^
+                        -o wide
+                '''
+
+                echo '--> Checking services...'
+
+                bat '''
+                    wsl -d "%WSL_DISTRO%" -- kubectl get service ^
+                        -n "%K8S_NAMESPACE%"
+                '''
+
+                echo '--> Checking ingress...'
+
+                bat '''
+                    wsl -d "%WSL_DISTRO%" -- kubectl get ingress ^
+                        -n "%K8S_NAMESPACE%"
+                '''
+
+                echo '=========================================================='
+                echo 'METAFORGE DEPLOYMENT VERIFIED'
+                echo '=========================================================='
             }
         }
     }
 
 
-    // =============================================================
+    // ==========================================================
     // POST ACTIONS
-    // =============================================================
+    // ==========================================================
+
     post {
 
-        always {
-            echo '--> Cleaning up transient workspace artifacts...'
-        }
-
         success {
+
             echo '=========================================================='
-            echo "   METAFORGE PIPELINE BUILD #${BUILD_NUMBER} SUCCESSFUL!"
+            echo 'METAFORGE PIPELINE SUCCESS'
             echo '=========================================================='
-            echo "--> Git Commit : ${env.GIT_COMMIT_HASH}"
-            echo "--> Docker     : ${LOCAL_IMAGE}"
-            echo "--> Kubernetes : ${K8S_NAMESPACE}"
-            echo "--> Deployment : ${K8S_DEPLOYMENT}"
+
+            echo 'GitHub       : SUCCESS'
+            echo 'Jenkins      : SUCCESS'
+            echo 'Tests        : PASSED'
+            echo 'Docker       : BUILT'
+            echo 'Security     : INSPECTED'
+            echo 'Terraform    : VALIDATED'
+            echo 'Ansible      : COMPLETED'
+            echo 'Kubernetes   : DEPLOYED'
+            echo 'Production   : VERIFIED'
+
+            echo '=========================================================='
+            echo 'MetaForge CI/CD pipeline completed successfully.'
             echo '=========================================================='
         }
 
         failure {
+
             echo '=========================================================='
-            echo "   METAFORGE PIPELINE BUILD #${BUILD_NUMBER} FAILED!"
+            echo 'METAFORGE PIPELINE FAILED'
             echo '=========================================================='
+
+            echo 'Check the failed stage above for the exact error.'
+
+            echo '=========================================================='
+        }
+
+        always {
+
+            echo 'Cleaning transient Jenkins artifacts...'
+
+            script {
+
+                bat '''
+                    if exist terraform\\tfplan del /f /q terraform\\tfplan
+                '''
+            }
         }
     }
 }
