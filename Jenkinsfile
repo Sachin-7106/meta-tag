@@ -475,11 +475,18 @@ pipeline {
                     wsl -d Ubuntu -- bash -lc "minikube status"
                 '''
 
+                // ==================================================
+                // FIX 1:
+                // Use %BUILD_NUMBER% instead of ${BUILD_NUMBER}
+                // so Jenkins/Windows expands the build number
+                // before the command is passed into WSL.
+                // ==================================================
+
                 bat '''
                     echo.
                     echo --> Loading Docker image into Minikube...
 
-                    wsl -d Ubuntu -- bash -lc "minikube image load metaforge/metatag-generator:jenkins-${BUILD_NUMBER}"
+                    wsl -d Ubuntu -- bash -lc "minikube image load metaforge/metatag-generator:jenkins-%BUILD_NUMBER%"
                 '''
 
                 bat '''
@@ -489,11 +496,23 @@ pipeline {
                     wsl -d Ubuntu -- bash -lc "cd /mnt/c/ProgramData/Jenkins/.jenkins/workspace/MetaForge-CI-CD/kubernetes && kubectl apply -f ."
                 '''
 
+                // ==================================================
+                // FIX 2:
+                // Kubernetes deployment.yaml contains:
+                //
+                //   - name: app
+                //
+                // NOT:
+                //
+                //   metaforge-app
+                //
+                // ==================================================
+
                 bat '''
                     echo.
                     echo --> Updating deployment image...
 
-                    wsl -d Ubuntu -- bash -lc "kubectl set image deployment/metatag-generator -n metaforge-prod metaforge-app=metaforge/metatag-generator:jenkins-${BUILD_NUMBER}"
+                    wsl -d Ubuntu -- bash -lc "kubectl set image deployment/metatag-generator -n metaforge-prod app=metaforge/metatag-generator:jenkins-%BUILD_NUMBER%"
                 '''
 
                 bat '''
